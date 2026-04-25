@@ -1,5 +1,6 @@
 #define PULSE 1
 #define STEP 0
+#define DYNAMIC_BRAKING 1
 
 // --- MOTOR & L298N PINS ---
 const int ENA_PIN = 5;  // PWM speed control (Must be a squiggly '~' pin)
@@ -88,11 +89,24 @@ void loop() {
     if(isLow)
     {
         analogWrite(ENA_PIN, 255);
+        if(DYNAMIC_BRAKING)
+        {
+          digitalWrite(IN1_PIN, HIGH);
+          digitalWrite(IN2_PIN, LOW);
+        }
         isLow = !isLow;
     }
     else
     {
-      analogWrite(ENA_PIN, 0);
+      if(DYNAMIC_BRAKING)
+      {
+        digitalWrite(IN1_PIN, LOW);
+        digitalWrite(IN2_PIN, LOW);
+      }
+      else
+      {
+        analogWrite(ENA_PIN, 0);
+      }
       isLow = !isLow; 
     }
     
