@@ -9,15 +9,15 @@ const int ENCODER_B = 3; // Phase B direction pin
 
 // --- ENCODER SPECIFICATION ---
 // UPDATED: Doubled to 1020 for CHANGE interrupt
-const float TOTAL_PPR = 1020.0;   
+const float TOTAL_PPR = 925.0;   
 
 // --- PID GAINS ---
 float Kp = 0.04;
-float Ki = 0.09;
-float Kd = 0.00;
+float Ki = 0.9;
+float Kd = 0.02;
 
 // --- CONTROL SETTINGS ---
-float setpoint = 360.0;           // angle
+float setpoint = 90;           // angle
 const float maxVoltage = 12.0;   // saturation like Simulink
 const int sample_time_ms = 20;
 
@@ -79,8 +79,8 @@ void loop() {
     float controlVoltage = 0;
     int pwm = 0;
 
-    // Stop near the target to reduce jitter
-    if (abs(error) < 1.0) {
+    // Stop near the target to reduce jitter  
+    if (abs(error) < 1) {//was 1
       stopMotor();
       // Notice the integral is NOT updated here. No deadband windup!
     } else {
@@ -100,6 +100,10 @@ void loop() {
         // If the controller wants to move, instantly add the minimum voltage needed to break gear friction
         float stiction_voltage = 2.5; 
         
+
+       
+
+
         if (controlVoltage > 0.05) {
           controlVoltage += stiction_voltage;
         } else if (controlVoltage < -0.05) {
