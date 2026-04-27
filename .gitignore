@@ -1,0 +1,6 @@
+slprj/
+tmwinternal/
+*.slxc
+*.slx.original
+*.asv
+*_spesession*.mat
