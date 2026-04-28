@@ -275,7 +275,7 @@ FINAL SUCCESS
 
 *Built with 🔧 at Ain Shams University · CSE481 Control Systems · Spring 2026*
 
-** Karim Samer · Tarek Mohammed **
+**Karim Samer · Tarek Mohammed**
 
 [![ASU](https://img.shields.io/badge/Ain_Shams_University-Engineering-8B0000?style=for-the-badge)]()
 
