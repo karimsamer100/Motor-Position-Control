@@ -13,14 +13,14 @@ This document describes the wiring connections between:
 
 The motor has 6 wires, each with a specific function:
 
-| Wire Color | Function | Connection |
-|-----------|--------|------------|
-| Red   | Motor Power (+) | L298N OUT2 |
-| White | Motor Power (-) | L298N OUT1 |
-| Blue  | Encoder VCC (+) | Arduino 5V |
-| Black | Encoder GND (-) | Arduino GND |
-| Yellow| Encoder Channel A | Arduino D3 |
-| Green | Encoder Channel B | Arduino D2 |
+| Wire Color |     Function      | Connection|
+|------------|-------------------|------------|
+| Red        | Motor Power (+)   | L298N OUT2 |
+| White      | Motor Power (-)   | L298N OUT1 |
+| Blue       | Encoder VCC (+)   | Arduino 5V |
+| Black      | Encoder GND (-)   | Arduino GND|
+| Yellow     | Encoder Channel A | Arduino D3 |
+| Green      | Encoder Channel B | Arduino D2 |
 
 ---
 
