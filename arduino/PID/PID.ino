@@ -1,25 +1,36 @@
+// Best Yet - Relative Angle + Direction + Zero Command
+// With settling monitor after reaching target
+
 // --- MOTOR & L298N PINS ---
-const int ENA_PIN = 5;  // PWM speed control
-const int IN1_PIN = 7;  // Direction Pin 1
-const int IN2_PIN = 6;  // Direction Pin 2
+const int ENA_PIN = 5;
+const int IN1_PIN = 7;
+const int IN2_PIN = 6;
 
 // --- ENCODER PINS ---
-const int ENCODER_A = 2; // Phase A interrupt pin
-const int ENCODER_B = 3; // Phase B direction pin
+const int ENCODER_A = 2;
+const int ENCODER_B = 3;
 
 // --- ENCODER SPECIFICATION ---
-// UPDATED: Doubled to 1020 for CHANGE interrupt
-const float TOTAL_PPR = 925.0;   
+const float TOTAL_PPR = 995;
 
 // --- PID GAINS ---
-float Kp = 0.04;
-float Ki = 0.9;
-float Kd = 0.02;
+float Kp = 0.035;
+float Ki = 0.4;
+float Kd = 0.042;
 
 // --- CONTROL SETTINGS ---
-float setpoint = 90;           // angle
-const float maxVoltage = 12.0;   // saturation like Simulink
+float setpoint = 0;
+const float maxVoltage = 12.0;
 const int sample_time_ms = 20;
+
+const float targetTolerance = 0.8;
+
+// --- STATE ---
+bool commandReceived = false;
+bool settlingMode = false;
+
+unsigned long settlingStartTime = 0;
+const unsigned long settlingDurationMs = 3000; // monitor 3 seconds after reaching target
 
 // --- VARIABLES ---
 volatile long encoder_count = 0;
@@ -40,136 +51,185 @@ void setup() {
   pinMode(ENCODER_A, INPUT_PULLUP);
   pinMode(ENCODER_B, INPUT_PULLUP);
 
-  // UPDATED: Changed from RISING to CHANGE to double resolution
   attachInterrupt(digitalPinToInterrupt(ENCODER_A), updateEncoder, CHANGE);
 
   stopMotor();
-
   previous_time = millis();
 
-  Serial.println("Time(ms),Setpoint,Angle,ControlVoltage,PWM,Error,Integra,Derivative");
+  Serial.println("Ready.");
+  Serial.println("First move pointer to real 0 degrees, then type: z");
+  Serial.println("Then enter: angle direction");
+  Serial.println("Example: 90 0 -> move +90 from current position");
+  Serial.println("Example: 90 1 -> move -90 from current position");
 }
 
 void loop() {
+  if (!commandReceived && Serial.available() > 0) {
+    char firstChar = Serial.peek();
+
+    if (firstChar == 'z' || firstChar == 'Z') {
+      Serial.read();
+
+      noInterrupts();
+      encoder_count = 0;
+      interrupts();
+
+      setpoint = 0;
+      integral = 0;
+      previous_error = 0;
+      settlingMode = false;
+
+      Serial.println("Current position is now ZERO.");
+      Serial.println("Enter angle and direction, example: 90 0");
+      clearSerialBuffer();
+      return;
+    }
+
+    float inputAngle = Serial.parseFloat();
+    int direction = Serial.parseInt();
+
+    if (inputAngle > 0 && (direction == 0 || direction == 1)) {
+      float currentAngle = getCurrentAngle();
+
+      if (direction == 0) {
+        setpoint = currentAngle + inputAngle;
+      } else {
+        setpoint = currentAngle - inputAngle;
+      }
+
+      Serial.print(inputAngle);
+      Serial.print(" degrees to target ");
+      Serial.println(setpoint);
+
+      commandReceived = true;
+      settlingMode = false;
+
+      integral = 0;
+      previous_error = 0;
+      previous_time = millis();
+
+      clearSerialBuffer();
+    } else {
+      Serial.println("Invalid input. Use: 90 0 or 90 1");
+      clearSerialBuffer();
+    }
+
+    return;
+  }
+
+  if (!commandReceived) {
+    stopMotor();
+    return;
+  }
+
   unsigned long current_time = millis();
 
   if (current_time - previous_time >= sample_time_ms) {
     float dt = (current_time - previous_time) / 1000.0;
     previous_time = current_time;
 
-    noInterrupts();
-    long count_copy = encoder_count;
-    interrupts();
-
-    // Convert encoder counts to angle
-    float angle = (count_copy / TOTAL_PPR) * 360.0;
-
-    // PID error
+    float angle = getCurrentAngle();
     error = setpoint - angle;
 
-    // --- ANTI-WINDUP STRATEGY 1: Zero-Crossing Reset ---
-    // If the error changes sign (we crossed the target), instantly erase the memory!
-    if ((error > 0 && previous_error < 0) || (error < 0 && previous_error > 0)) {
-      integral = 0;
+    if (abs(error) < targetTolerance && !settlingMode) {
+      stopMotor();
+      settlingMode = true;
+      settlingStartTime = millis();
+
+      Serial.println("Target reached. Monitoring settling...");
+    }
+
+    if (settlingMode) {
+      stopMotor();
+
+      Serial.print("Target: ");
+      Serial.print(setpoint);
+      Serial.print(" | Angle: ");
+      Serial.print(angle);
+      Serial.print(" | Error: ");
+      Serial.println(error);
+
+      if (millis() - settlingStartTime >= settlingDurationMs) {
+        settlingMode = false;
+        commandReceived = false;
+
+        Serial.println("Movement finished.");
+        Serial.println("Enter another relative command, or type z to reset zero.");
+      }
+
+      return;
     }
 
     float derivative = (error - previous_error) / dt;
-    
-    // Initialize outputs to 0 so they print correctly if the motor is stopped
-    float controlVoltage = 0;
-    int pwm = 0;
 
-    // Stop near the target to reduce jitter  
-    if (abs(error) < 1) {//was 1
-      stopMotor();
-      // Notice the integral is NOT updated here. No deadband windup!
-    } else {
-      // --- INTEGRAL ACCUMULATION ---
-      // Only build integral when actively correcting an error
-      integral += error * dt;
+    integral += error * dt;
 
-      // --- ANTI-WINDUP STRATEGY 2: Integral Clamping ---
-      // Prevent the memory from building up to dangerous levels (Cap at 3V)
-      float max_integral_memory = 3.0 / Ki; 
-      integral = constrain(integral, -max_integral_memory, max_integral_memory);
+    float max_integral_memory = 3.0 / Ki;
+    integral = constrain(integral, -max_integral_memory, max_integral_memory);
 
-        // --- PID CALCULATION ---
-        controlVoltage = (Kp * error) + (Ki * integral) + (Kd * derivative);
+    float controlVoltage = (Kp * error) + (Ki * integral) + (Kd * derivative);
 
-        // --- STICTION COMPENSATION ---
-        // If the controller wants to move, instantly add the minimum voltage needed to break gear friction
-        float stiction_voltage = 2.5; 
-        
+    controlVoltage = constrain(controlVoltage, -maxVoltage, maxVoltage);
 
-       
+    int pwm = (int)((abs(controlVoltage) / maxVoltage) * 255.0);
+    pwm = constrain(pwm, 0, 255);
 
-
-        if (controlVoltage > 0.05) {
-          controlVoltage += stiction_voltage;
-        } else if (controlVoltage < -0.05) {
-          controlVoltage -= stiction_voltage;
-        }
-
-        // Limit voltage command
-        controlVoltage = constrain(controlVoltage, -maxVoltage, maxVoltage);
-
-      // Convert voltage command to PWM
-      pwm = (int)((abs(controlVoltage) / maxVoltage) * 255.0);
-      pwm = constrain(pwm, 0, 255);
-
-      driveMotor(controlVoltage, pwm);
+    if (pwm > 0 && pwm < 45) {
+      pwm = 45;
     }
+
+    driveMotor(controlVoltage, pwm);
 
     previous_error = error;
 
-    // --- SERIAL LOGGING ---
-    Serial.print(current_time);
-    Serial.print(",");
+    Serial.print("Target: ");
     Serial.print(setpoint);
-    Serial.print(",");
+    Serial.print(" | Angle: ");
     Serial.print(angle);
-    Serial.print(",");
-    Serial.print(controlVoltage);
-    Serial.print(",");
-    Serial.print(pwm);
-    Serial.print(",");
-    Serial.print(error);
-    Serial.print(",");
-    Serial.print(integral);
-    Serial.print(",");
-    Serial.println(derivative);
+    Serial.print(" | Error: ");
+    Serial.println(error);
   }
 }
 
+float getCurrentAngle() {
+  noInterrupts();
+  long count_copy = encoder_count;
+  interrupts();
+
+  return (count_copy / TOTAL_PPR) * 360.0;
+}
+
 void updateEncoder() {
-  // Read the current state of both encoder pins
   int stateA = digitalRead(ENCODER_A);
   int stateB = digitalRead(ENCODER_B);
 
-  // Compare them using Quadrature Logic
-  // If the states match, we are spinning one way. If they differ, the other.
   if (stateA == stateB) {
-    encoder_count++;
-  } else {
     encoder_count--;
+  } else {
+    encoder_count++;
   }
 }
 
 void driveMotor(float controlVoltage, int pwm) {
   if (controlVoltage > 0) {
-    digitalWrite(IN1_PIN, HIGH);
-    digitalWrite(IN2_PIN, LOW);
-  } else {
     digitalWrite(IN1_PIN, LOW);
     digitalWrite(IN2_PIN, HIGH);
+  } else {
+    digitalWrite(IN1_PIN, HIGH);
+    digitalWrite(IN2_PIN, LOW);
   }
 
   analogWrite(ENA_PIN, pwm);
 }
 
 void stopMotor() {
-  // True Dynamic Braking
-  digitalWrite(IN1_PIN, HIGH);
-  digitalWrite(IN2_PIN, HIGH);
+  digitalWrite(IN1_PIN, LOW);
+  digitalWrite(IN2_PIN, LOW);
   analogWrite(ENA_PIN, 255);
+}
+
+void clearSerialBuffer() {
+  while (Serial.available() > 0) {
+    Serial.read();
+  }
 }
