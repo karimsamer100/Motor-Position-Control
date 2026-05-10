@@ -99,7 +99,8 @@ void loop() {
     else
     {
       if(DYNAMIC_BRAKING)
-      {
+      { 
+        analogWrite(ENA_PIN, 255);   // keep bridge enabled for braking
         digitalWrite(IN1_PIN, LOW);
         digitalWrite(IN2_PIN, LOW);
       }
